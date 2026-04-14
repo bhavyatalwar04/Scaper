@@ -1,6 +1,3 @@
-# scraper.py - Coventry University postgrad course scraper
-# Pulls course data from https://www.coventry.ac.uk and dumps it to JSON
-
 import json
 import re
 import time
@@ -44,12 +41,10 @@ def _get_soup(url, session):
 
 
 def _main_content(soup):
-    """grab the <main> block so we skip the huge nav/header"""
     return soup.find("main") or soup.find(id="main") or soup
 
 
 def _sidebar_value(soup, label):
-    """look for a h3/h4 matching 'label' and pull the text from its parent div"""
     content = _main_content(soup)
     for tag in content.find_all(["h3", "h4"]):
         if label.lower() in _clean(tag.get_text()).lower():
@@ -61,10 +56,7 @@ def _sidebar_value(soup, label):
     return ""
 
 
-# -- URL Discovery --
-
 def discover_courses(session):
-    """parse the A-Z listing page and pull out unique PG course URLs"""
     log.info("--- discovering course URLs ---")
     soup = _get_soup(AZ_LIST_URL, session)
     if not soup:
@@ -80,11 +72,9 @@ def discover_courses(session):
 
         full_url = urljoin(BASE_URL, href)
 
-        # skip older term listings and online-only
         if "term=2025-26" in full_url or "/online/" in full_url:
             continue
 
-        # deduplicate by course slug
         m = re.search(r"/course-structure/pg/[^/]+/([^/?]+)", full_url)
         if not m:
             continue
@@ -98,15 +88,12 @@ def discover_courses(session):
     return urls
 
 
-# -- Individual page parsing --
-
 def _get_course_name(soup):
     title = soup.find("title")
     if title:
         t = _clean(title.get_text())
         if "|" in t:
             return t.split("|")[0].strip()
-    # fallback to og:title
     og = soup.find("meta", property="og:title")
     if og and og.get("content"):
         c = _clean(og["content"])
@@ -182,7 +169,6 @@ def _get_start_dates(soup):
 
 
 def _parse_entry_reqs(soup):
-    """walk sibling elements after the 'Entry requirements' heading"""
     result = {"entry_text": "", "english_text": ""}
     content = _main_content(soup)
 
@@ -194,7 +180,7 @@ def _parse_entry_reqs(soup):
             sib = heading.find_next_sibling()
             while sib and sib.name != "h2":
                 t = _clean(sib.get_text())
-                if t and len(t) < 1000:  # skip huge nav blobs
+                if t and len(t) < 1000:
                     parts.append(t)
                 sib = sib.find_next_sibling()
             result["entry_text"] = " ".join(parts)
@@ -217,7 +203,6 @@ def _parse_fees(soup):
     txt = content.get_text()
     out = {"uk": "", "intl": "", "scholarships": ""}
 
-    # international fee - try a few patterns
     for pat in [r"international[^£]{0,50}(£[\d,]+)", r"(?:international|overseas)[^£]{0,80}(£[\d,]+)"]:
         m = re.search(pat, txt, re.I)
         if m:
@@ -225,7 +210,6 @@ def _parse_fees(soup):
             break
 
     if not out["intl"]:
-        # sometimes fees are in table cells
         for tag in content.find_all(["td", "span", "p"]):
             t = _clean(tag.get_text())
             if "international" in t.lower() and "£" in t and len(t) < 200:
@@ -234,12 +218,10 @@ def _parse_fees(soup):
                     out["intl"] = fm.group(0)
                     break
 
-    # uk fee
     m = re.search(r"uk[^£]{0,50}(£[\d,]+)", txt, re.I)
     if m:
         out["uk"] = m.group(1)
 
-    # scholarships - look for actual scholarship links, not the nav
     schol_bits = []
     for a in content.find_all("a", href=True):
         atxt = _clean(a.get_text())
@@ -252,7 +234,6 @@ def _parse_fees(soup):
             if "scholarship" in t.lower() and 20 < len(t) < 300:
                 schol_bits.append(t)
 
-    # dedupe and join
     unique = list(dict.fromkeys(schol_bits))
     out["scholarships"] = " | ".join(unique[:3])
 
@@ -260,7 +241,6 @@ def _parse_fees(soup):
 
 
 def _regex_score(label, text):
-    """generic 'find LABEL: XX' extractor for english tests"""
     m = re.search(rf"\b{label}\b[^.]*?(\d{{2,3}})", text, re.I)
     return m.group(0).strip() if m else ""
 
@@ -271,7 +251,6 @@ def _find_ielts(text):
 
 
 def scrape_course(url, session):
-    """fetch one course page and pull out all the fields we need"""
     soup = _get_soup(url, session)
     if not soup:
         return None
@@ -294,27 +273,26 @@ def scrape_course(url, session):
         "study_level": _get_study_level(soup, url),
         "course_duration": _get_duration(soup),
         "all_intakes_available": _get_start_dates(soup),
-        "mandatory_documents_required": req_text[:500] if req_text else "NA",
-        "yearly_tuition_fee": fees["intl"] or fees["uk"] or "NA",
-        "scholarship_availability": fees["scholarships"] or "NA",
-        "gre_gmat_mandatory_min_score": "NA",
-        "indian_regional_institution_restrictions": "NA",
-        "class_12_boards_accepted": "NA",
-        "gap_year_max_accepted": "NA",
-        "min_duolingo": _regex_score("Duolingo", eng_text) or _regex_score("Duolingo", page_text) or "NA",
-        "english_waiver_class12": "NA",
-        "english_waiver_moi": "NA",
-        "min_ielts": _find_ielts(eng_text) or _find_ielts(page_text) or "NA",
-        "kaplan_test_of_english": "NA",
-        "min_pte": _regex_score("PTE", eng_text) or _regex_score("PTE", page_text) or "NA",
-        "min_toefl": _regex_score("TOEFL", eng_text) or _regex_score("TOEFL", page_text) or "NA",
-        "ug_academic_min_gpa": "NA",
-        "twelfth_pass_min_cgpa": "NA",
-        "mandatory_work_exp": "NA",
-        "max_backlogs": "NA",
+        "mandatory_documents_required": req_text[:500] if req_text else "",
+        "yearly_tuition_fee": fees["intl"] or fees["uk"] or "",
+        "scholarship_availability": fees["scholarships"] or "",
+        "gre_gmat_mandatory_min_score": "",
+        "indian_regional_institution_restrictions": "",
+        "class_12_boards_accepted": "",
+        "gap_year_max_accepted": "",
+        "min_duolingo": _regex_score("Duolingo", eng_text) or _regex_score("Duolingo", page_text) or "",
+        "english_waiver_class12": "",
+        "english_waiver_moi": "",
+        "min_ielts": _find_ielts(eng_text) or _find_ielts(page_text) or "",
+        "kaplan_test_of_english": "",
+        "min_pte": _regex_score("PTE", eng_text) or _regex_score("PTE", page_text) or "",
+        "min_toefl": _regex_score("TOEFL", eng_text) or _regex_score("TOEFL", page_text) or "",
+        "ug_academic_min_gpa": "",
+        "twelfth_pass_min_cgpa": "",
+        "mandatory_work_exp": "",
+        "max_backlogs": "",
     }
 
-    # work experience (skip boilerplate about field trips)
     for pat in [r"(?:require|need|must have|minimum of)\s+([\w\s]*work experience[^.]{0,100}\.)",
                 r"(\d+\s*years?\s*(?:of\s+)?(?:relevant\s+)?(?:work|professional|industry)\s+experience[^.]*\.)"]:
         m = re.search(pat, page_text, re.I)
@@ -324,7 +302,6 @@ def scrape_course(url, session):
                 data["mandatory_work_exp"] = hit
                 break
 
-    # academic GPA / class info
     for pat in [r"((?:first|second|2:1|2:2|third)[\s-]*class[^.]*\.)",
                 r"(minimum\s+of\s+\d+%[^.]*\.)",
                 r"(\d+\.?\d*\s*GPA[^.]*\.)"]:
@@ -346,7 +323,6 @@ def save_json(data, path):
 def main():
     session = requests.Session()
 
-    # step 1: grab course URLs from the A-Z page
     all_urls = discover_courses(session)
     if not all_urls:
         log.error("no courses found, exiting")
@@ -355,7 +331,6 @@ def main():
     urls = all_urls[:TARGET_COUNT]
     log.info(f"scraping {len(urls)} courses:\n" + "\n".join(f"  {i+1}. {u}" for i, u in enumerate(urls)))
 
-    # step 2: scrape each course page
     results = []
     for i, url in enumerate(urls):
         log.info(f"\n[{i+1}/{len(urls)}]")
@@ -368,14 +343,12 @@ def main():
         if i < len(urls) - 1:
             time.sleep(random.uniform(1.5, 3.0))
 
-    # step 3: dump to json
     if results:
         save_json(results, OUTPUT_FILE)
         print(f"\ndone - {len(results)} courses written to {OUTPUT_FILE}")
     else:
         log.error("nothing scraped successfully")
 
-    # quick summary
     for i, c in enumerate(results, 1):
         print(f"  {i}. {c['program_course_name']}  |  {c['course_duration']}  |  {c['yearly_tuition_fee']}")
 
